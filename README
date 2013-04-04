@@ -1,0 +1,22 @@
+The purpose of this project is to provide a timeline widget written in Gtk, embedding a timelineCanvas
+written in Gtk.
+
+It will be heavily relying on GES, so only re-usable in a GES context.
+
+For now you can launch the project either as stand alone, but it will be static and quite frustrating,
+or with ipython that way :
+
+ipython
+>>> %gui gtk3
+>>> %run timeline.py /path/to/media/file
+
+A sample ipython session might be:
+
+>>> tl = widget.timeline.bTimeline
+>>> layer = tl.append_layer()
+>>> asset = widget.project.list_assets(GES.UriClip)[0]
+>>> clip = asset.extract()
+>>> widget.addClipToLayer(layer, asset, 0, 20, 0)
+>>> whatever ...
+
+See source code for more comments.
