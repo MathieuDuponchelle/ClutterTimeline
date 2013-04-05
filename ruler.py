@@ -31,6 +31,7 @@ from gi.repository import GObject
 
 from gettext import gettext as _
 
+from pipeline import Seeker
 from utils import Zoomable
 from loggable import Loggable
 from ui import time_to_string, beautify_length
@@ -62,7 +63,7 @@ class ScaleRuler(Gtk.DrawingArea, Zoomable, Loggable):
         Loggable.__init__(self)
         self.log("Creating new ScaleRuler")
         self.app = instance
-        #self._seeker = Seeker()
+        self._seeker = Seeker()
         self.hadj = hadj
         hadj.connect("value-changed", self._hadjValueChangedCb)
         self.add_events(Gdk.EventMask.POINTER_MOTION_MASK |
@@ -152,8 +153,8 @@ class ScaleRuler(Gtk.DrawingArea, Zoomable, Loggable):
         # The distinction between the ruler and timeline canvas is theoretical.
         # If the user interacts with the ruler, have the timeline steal focus
         # from other widgets. This reactivates keyboard shortcuts for playback.
-        timeline = self.app.gui.timeline_ui
-        timeline._canvas.grab_focus(timeline._root_item)
+        #timeline = self.app.gui.timeline_ui
+        #timeline._canvas.grab_focus(timeline._root_item)
         return False
 
     def do_motion_notify_event(self, event):
