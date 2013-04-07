@@ -21,6 +21,8 @@ from datetime import datetime
 
 from gettext import gettext as _
 
+from pipeline import Pipeline
+
 # CONSTANTS
 
 EXPANDED_SIZE = 50
@@ -46,17 +48,22 @@ class TimelineElement(Clutter.Actor, Zoomable):
         Zoomable.__init__(self)
         Clutter.Actor.__init__(self)
 
+        self.timeline = timeline
+
         self._createBackground(track)
 
         self._createMarquee()
 
+        self._createMockUpRectangle()
+
         self.bElement = bElement
+
+        self.track_type = self.bElement.get_track_type() # This won't change
 
         size = self.bElement.get_duration()
         self.set_size(self.nsToPixel(size), EXPANDED_SIZE)
         self.set_reactive(True)
         self._connectToEvents()
-        self.timeline = timeline
         self.bElement.selected = Selected()
         self.bElement.selected.connect("selected-changed", self._selectedChangedCb)
 
@@ -68,7 +75,54 @@ class TimelineElement(Clutter.Actor, Zoomable):
         self.props.width = width
         self.props.height = height
 
+    def updateMockUpRectangle(self, priority, y, isControlledByBrother):
+        # Only tricky part of the code, can be called by the linked track element.
+        if self.mockUpRectangle.props.visible == True:
+            self.mockUpRectangle.props.x = self.props.x
+
+        if priority < 0:
+            return
+
+        # Here we make it so the calculation is the same for audio and video.
+        if self.track_type == GES.TrackType.AUDIO and not isControlledByBrother:
+            y -= self.nbrLayers * (EXPANDED_SIZE + SPACING)
+
+        # And here we take into account the fact that the pointer might actually be
+        # on the other track element, meaning we have to offset it.
+        if isControlledByBrother:
+            if self.track_type == GES.TrackType.AUDIO:
+                y += self.nbrLayers * (EXPANDED_SIZE + SPACING)
+            else:
+                y -= self.nbrLayers * (EXPANDED_SIZE + SPACING)
+
+        # Would that be a new layer ?
+        if priority == self.nbrLayers:
+            self.mockUpRectangle.set_size(self.props.width, SPACING)
+            self.mockUpRectangle.props.y = priority * (EXPANDED_SIZE + SPACING)
+            if self.track_type == GES.TrackType.AUDIO:
+                self.mockUpRectangle.props.y += self.nbrLayers * (EXPANDED_SIZE + SPACING)
+            self.mockUpRectangle.props.visible = True
+        else:
+            # No need to mockup on the same layer
+            if priority == self.bElement.get_parent().get_layer().get_priority():
+                self.mockUpRectangle.props.visible = False
+            # We would be moving to an existing layer.
+            elif priority < self.nbrLayers:
+                self.mockUpRectangle.set_size(self.props.width, EXPANDED_SIZE)
+                self.mockUpRectangle.props.y = priority * (EXPANDED_SIZE + SPACING) + SPACING
+                if self.track_type == GES.TrackType.AUDIO:
+                    self.mockUpRectangle.props.y += self.nbrLayers * (EXPANDED_SIZE + SPACING)
+                self.mockUpRectangle.props.visible = True
+
     # Internal API
+
+    def _createMockUpRectangle(self):
+        self.mockUpRectangle = Clutter.Rectangle.new()
+        self.mockUpRectangle.set_border_width(3)
+        self.mockUpRectangle.set_border_color(Clutter.Color.new(100, 100, 100, 255))
+        self.mockUpRectangle.set_color(Clutter.Color.new(100, 100, 100, 50))
+        self.mockUpRectangle.props.visible = False
+        self.timeline.add_child(self.mockUpRectangle)
 
     def _createBackground(self, track):
         self.background = Clutter.Rectangle()
@@ -100,6 +154,12 @@ class TimelineElement(Clutter.Actor, Zoomable):
         action.connect("drag-end", self._dragEndCb)
         self.dragAction = action
 
+    def _getLayerForY(self, y):
+        if self.bElement.get_track_type() == GES.TrackType.AUDIO:
+            y -= self.nbrLayers * (EXPANDED_SIZE + SPACING)
+        priority = int(y / (EXPANDED_SIZE + SPACING))
+        return priority
+
     # Interface (Zoomable)
 
     def zoomChanged(self):
@@ -115,17 +175,45 @@ class TimelineElement(Clutter.Actor, Zoomable):
     def _dragBeginCb(self, action, actor, event_x, event_y, modifiers):
         self._context = EditingContext(self.bElement, self.timeline.bTimeline, GES.EditMode.EDIT_NORMAL, GES.Edge.EDGE_NONE, self.timeline.selection.getSelectedTrackElements(), None)
 
+        # This can't change during a drag, so we can safely compute it now for drag events.
+        self.nbrLayers = len(self.timeline.bTimeline.get_layers())
+        # We can also safely find if the object has a brother element
+        self.brother = self.timeline.findBrother(self.bElement)
+        self.brother.nbrLayers = self.nbrLayers
+
         self._dragBeginStart = self.bElement.get_start()
         self.dragBeginStartX = event_x
+        self.dragBeginStartY = event_y
 
     def _dragProgressCb(self, action, actor, delta_x, delta_y):
         # We can't use delta_x here because it fluctuates weirdly.
-        delta_x = self.dragAction.get_motion_coords()[0] - self.dragBeginStartX
+        coords = self.dragAction.get_motion_coords()
+        delta_x = coords[0] - self.dragBeginStartX
+        delta_y = coords[1] - self.dragBeginStartY
+
+        priority = self._getLayerForY(coords[1])
+        self.updateMockUpRectangle(priority, coords[1], False)
+        if self.brother:
+            self.brother.updateMockUpRectangle(priority, coords[1], True)
+
         new_start = self._dragBeginStart + self.pixelToNs(delta_x)
-        self._context.editTo(new_start, 0)
+        self._context.editTo(new_start, self.bElement.get_parent().get_layer().get_priority())
         return False
 
     def _dragEndCb(self, action, actor, event_x, event_y, modifiers):
+        coords = self.dragAction.get_motion_coords()
+        delta_x = coords[0] - self.dragBeginStartX
+        new_start = self._dragBeginStart + self.pixelToNs(delta_x)
+
+        priority = self._getLayerForY(coords[1])
+        priority = min(priority, len(self.timeline.bTimeline.get_layers()))
+
+        self.mockUpRectangle.props.visible = False
+        if self.brother:
+            self.brother.mockUpRectangle.props.visible = False
+
+        priority = max(0, priority)
+        self._context.editTo(new_start, priority)
         self._context.finish()
 
     def _selectedChangedCb(self, selected, isSelected):
@@ -140,8 +228,12 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         self.props.height = 500
         self.elements = []
         self.selection = Selection()
+        self._createPlayhead()
 
     # Public API
+
+    def setPipeline(self, pipeline):
+        pipeline.connect('position', self._positionCb)
 
     def setBackendTimeline(self, bTimeline):
         """
@@ -163,14 +255,38 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         """
         self.selection.setSelection(self.selection.getSelectedTrackElements(), UNSELECT)
 
+    def findBrother(self, element):
+        father = element.get_parent()
+        for elem in self.elements:
+            if elem.bElement.get_parent() == father and elem.bElement != element:
+                return elem
+        return None
+
     #Internal API
+
+    def _positionCb(self, pipeline, position):
+        self.playhead.set_z_position(1)
+        self.playhead.props.x = self.nsToPixel(position)
+
+    def _updatePlayHead(self):
+        height = len(self.bTimeline.get_layers()) * (EXPANDED_SIZE + SPACING) * 2
+        self.playhead.set_size(2, height)
+
+    def _createPlayhead(self):
+        self.playhead = Clutter.Rectangle()
+        self.playhead.set_color(Clutter.Color.new(200, 0, 0, 255))
+        self.playhead.set_size(0, 0)
+        self.playhead.set_position(0, 0)
+        self.add_child(self.playhead)
 
     def _addTimelineElement(self, track, bElement):
         element = TimelineElement(bElement, track, self)
+        element.set_z_position(-1)
 
         bElement.connect("notify::start", self._elementStartChangedCb, element)
         bElement.connect("notify::duration", self._elementDurationChangedCb, element)
         bElement.connect("notify::in-point", self._elementInPointChangedCb, element)
+        bElement.connect("notify::priority", self._elementPriorityChangedCb, element)
 
         self.elements.append(element)
 
@@ -190,6 +306,7 @@ class Timeline(Clutter.ScrollActor, Zoomable):
 
     # Crack, change that when we have retractable layers
     def _setElementY(self, element):
+        element.save_easing_state()
         y = 0
         bElement = element.bElement
         track_type = bElement.get_track_type()
@@ -200,6 +317,7 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         y += bElement.get_parent().get_layer().get_priority() * (EXPANDED_SIZE + SPACING) + SPACING
 
         element.props.y = y
+        element.restore_easing_state()
 
     # Interface overrides (Zoomable)
 
@@ -215,10 +333,12 @@ class Timeline(Clutter.ScrollActor, Zoomable):
             self._setElementY(element)
         layer.connect("clip-added", self._clipAddedCb)
         layer.connect("clip-removed", self._clipRemovedCb)
+        self._updatePlayHead()
 
     def _layerRemovedCb(self, timeline, layer):
         layer.disconnect_by_func(self._clipAddedCb)
         layer.disconnect_by_func(self._clipRemovedCb)
+        self._updatePlayHead()
 
     def _clipAddedCb(self, layer, clip):
         clip.connect("child-added", self._elementAddedCb)
@@ -239,6 +359,9 @@ class Timeline(Clutter.ScrollActor, Zoomable):
 
     def _trackElementRemovedCb(self, track, bElement):
         self._removeTimelineElement(track, bElement)
+
+    def _elementPriorityChangedCb(self, bElement, priority, element):
+        self._setElementY(element)
 
     def _elementStartChangedCb(self, bElement, start, element):
         self._setElementX(element)
@@ -442,16 +565,24 @@ class TimelineTest(Zoomable):
         if actor == stage:
             self.timeline.emptySelection()
 
-    def _doAssetAddedCb(self, project, asset, layer):
-        self.addClipToLayer(layer, asset, 2, 25, 5)
+    def doSeek(self):
+        #self.pipeline.simple_seek(3000000000)
+        return False
 
-        self.pipeline = GES.TimelinePipeline()
+    def _doAssetAddedCb(self, project, asset, layer):
+        self.addClipToLayer(layer, asset, 2, 10, 5)
+        self.addClipToLayer(layer, asset, 15, 10, 5)
+
+        self.pipeline = Pipeline()
         self.pipeline.add_timeline(layer.get_timeline())
 
         self.bus = self.pipeline.get_bus()
         self.bus.add_signal_watch()
         self.bus.connect("message", self.handle_message)
-        self.pipeline.set_state(Gst.State.PLAYING)
+        #self.pipeline.togglePlayback()
+        self.pipeline.activatePositionListener()
+        self.timeline.setPipeline(self.pipeline)
+        GObject.timeout_add(1000, self.doSeek)
         Zoomable.setZoomLevel(50)
 
     def testTimeline(self, timeline):
