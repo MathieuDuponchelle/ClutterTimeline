@@ -1,5 +1,5 @@
 The purpose of this project is to provide a timeline widget written in Gtk, embedding a timelineCanvas
-written in Gtk.
+written in Clutter.
 
 It will be heavily relying on GES, so only re-usable in a GES context.
 

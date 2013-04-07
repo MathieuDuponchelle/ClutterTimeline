@@ -54,7 +54,7 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
         self._createMarquee()
 
-        self._createMockUpRectangle()
+        self._createGhostclip()
 
         self.bElement = bElement
 
@@ -75,10 +75,9 @@ class TimelineElement(Clutter.Actor, Zoomable):
         self.props.width = width
         self.props.height = height
 
-    def updateMockUpRectangle(self, priority, y, isControlledByBrother):
+    def updateGhostclip(self, priority, y, isControlledByBrother):
         # Only tricky part of the code, can be called by the linked track element.
-        if self.mockUpRectangle.props.visible == True:
-            self.mockUpRectangle.props.x = self.props.x
+        self.ghostclip.props.x = self.props.x
 
         if priority < 0:
             return
@@ -97,32 +96,32 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
         # Would that be a new layer ?
         if priority == self.nbrLayers:
-            self.mockUpRectangle.set_size(self.props.width, SPACING)
-            self.mockUpRectangle.props.y = priority * (EXPANDED_SIZE + SPACING)
+            self.ghostclip.set_size(self.props.width, SPACING)
+            self.ghostclip.props.y = priority * (EXPANDED_SIZE + SPACING)
             if self.track_type == GES.TrackType.AUDIO:
-                self.mockUpRectangle.props.y += self.nbrLayers * (EXPANDED_SIZE + SPACING)
-            self.mockUpRectangle.props.visible = True
+                self.ghostclip.props.y += self.nbrLayers * (EXPANDED_SIZE + SPACING)
+            self.ghostclip.props.visible = True
         else:
             # No need to mockup on the same layer
             if priority == self.bElement.get_parent().get_layer().get_priority():
-                self.mockUpRectangle.props.visible = False
+                self.ghostclip.props.visible = False
             # We would be moving to an existing layer.
             elif priority < self.nbrLayers:
-                self.mockUpRectangle.set_size(self.props.width, EXPANDED_SIZE)
-                self.mockUpRectangle.props.y = priority * (EXPANDED_SIZE + SPACING) + SPACING
+                self.ghostclip.set_size(self.props.width, EXPANDED_SIZE)
+                self.ghostclip.props.y = priority * (EXPANDED_SIZE + SPACING) + SPACING
                 if self.track_type == GES.TrackType.AUDIO:
-                    self.mockUpRectangle.props.y += self.nbrLayers * (EXPANDED_SIZE + SPACING)
-                self.mockUpRectangle.props.visible = True
+                    self.ghostclip.props.y += self.nbrLayers * (EXPANDED_SIZE + SPACING)
+                self.ghostclip.props.visible = True
 
     # Internal API
 
-    def _createMockUpRectangle(self):
-        self.mockUpRectangle = Clutter.Rectangle.new()
-        self.mockUpRectangle.set_border_width(3)
-        self.mockUpRectangle.set_border_color(Clutter.Color.new(100, 100, 100, 255))
-        self.mockUpRectangle.set_color(Clutter.Color.new(100, 100, 100, 50))
-        self.mockUpRectangle.props.visible = False
-        self.timeline.add_child(self.mockUpRectangle)
+    def _createGhostclip(self):
+        self.ghostclip = Clutter.Rectangle.new()
+        self.ghostclip.set_border_width(3)
+        self.ghostclip.set_border_color(Clutter.Color.new(100, 100, 100, 255))
+        self.ghostclip.set_color(Clutter.Color.new(100, 100, 100, 50))
+        self.ghostclip.props.visible = False
+        self.timeline.add_child(self.ghostclip)
 
     def _createBackground(self, track):
         self.background = Clutter.Rectangle()
@@ -179,7 +178,8 @@ class TimelineElement(Clutter.Actor, Zoomable):
         self.nbrLayers = len(self.timeline.bTimeline.get_layers())
         # We can also safely find if the object has a brother element
         self.brother = self.timeline.findBrother(self.bElement)
-        self.brother.nbrLayers = self.nbrLayers
+        if self.brother:
+            self.brother.nbrLayers = self.nbrLayers
 
         self._dragBeginStart = self.bElement.get_start()
         self.dragBeginStartX = event_x
@@ -191,10 +191,12 @@ class TimelineElement(Clutter.Actor, Zoomable):
         delta_x = coords[0] - self.dragBeginStartX
         delta_y = coords[1] - self.dragBeginStartY
 
-        priority = self._getLayerForY(coords[1])
-        self.updateMockUpRectangle(priority, coords[1], False)
+        y = coords[1] + self.timeline._container.point.y
+
+        priority = self._getLayerForY(y)
+        self.updateGhostclip(priority, y, False)
         if self.brother:
-            self.brother.updateMockUpRectangle(priority, coords[1], True)
+            self.brother.updateGhostclip(priority, y, True)
 
         new_start = self._dragBeginStart + self.pixelToNs(delta_x)
         self._context.editTo(new_start, self.bElement.get_parent().get_layer().get_priority())
@@ -205,12 +207,12 @@ class TimelineElement(Clutter.Actor, Zoomable):
         delta_x = coords[0] - self.dragBeginStartX
         new_start = self._dragBeginStart + self.pixelToNs(delta_x)
 
-        priority = self._getLayerForY(coords[1])
+        priority = self._getLayerForY(coords[1] + self.timeline._container.point.y)
         priority = min(priority, len(self.timeline.bTimeline.get_layers()))
 
-        self.mockUpRectangle.props.visible = False
+        self.ghostclip.props.visible = False
         if self.brother:
-            self.brother.mockUpRectangle.props.visible = False
+            self.brother.ghostclip.props.visible = False
 
         priority = max(0, priority)
         self._context.editTo(new_start, priority)
@@ -220,7 +222,7 @@ class TimelineElement(Clutter.Actor, Zoomable):
         self.marquee.props.visible = isSelected
 
 class Timeline(Clutter.ScrollActor, Zoomable):
-    def __init__(self):
+    def __init__(self, container):
         Clutter.ScrollActor.__init__(self)
         Zoomable.__init__(self)
         self.set_background_color(Clutter.Color.new(31, 30, 33, 255))
@@ -229,6 +231,7 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         self.elements = []
         self.selection = Selection()
         self._createPlayhead()
+        self._container = container
 
     # Public API
 
@@ -333,6 +336,8 @@ class Timeline(Clutter.ScrollActor, Zoomable):
             self._setElementY(element)
         layer.connect("clip-added", self._clipAddedCb)
         layer.connect("clip-removed", self._clipRemovedCb)
+        self.props.height = (len(self.bTimeline.get_layers()) + 1) * (EXPANDED_SIZE + SPACING) * 2 + SPACING
+        self._container.vadj.props.upper = self.props.height
         self._updatePlayHead()
 
     def _layerRemovedCb(self, timeline, layer):
@@ -446,6 +451,10 @@ class TimelineTest(Zoomable):
         vbox = Gtk.VBox()
         self.window.add(vbox)
 
+        self.point = Clutter.Point()
+        self.point.x = 0
+        self.point.y = 0
+
         self.zoomBox = ZoomBox()
         vbox.pack_end(self.zoomBox, False, False, False)
 
@@ -468,7 +477,7 @@ class TimelineTest(Zoomable):
 
         stage.show()
 
-        widget = Timeline()
+        widget = Timeline(self)
 
         stage.add_child(widget)
         stage.connect("destroy", quit_)
@@ -479,7 +488,16 @@ class TimelineTest(Zoomable):
 
     def _packScrollbars(self, vbox):
         self.hadj = Gtk.Adjustment()
+        self.vadj = Gtk.Adjustment()
         self.hadj.connect("value-changed", self._updateScrollPosition)
+        self.vadj.connect("value-changed", self._updateScrollPosition)
+
+        self._vscrollbar = Gtk.VScrollbar(self.vadj)
+
+        def scrollbar_show_cb(scrollbar):
+            scrollbar.hide()
+
+#        self._vscrollbar.connect("show", scrollbar_show_cb)
 
         self._hscrollBar = Gtk.HScrollbar(self.hadj)
         vbox.pack_end(self._hscrollBar, False, True, False)
@@ -488,15 +506,23 @@ class TimelineTest(Zoomable):
 
         self.ruler.set_size_request(0, 25)
 
-        vbox.pack_end(self.embed, True, True, True)
+        self.vadj.props.lower = 0
+        self.vadj.props.upper = 500
+
+        hbox = Gtk.HBox()
+        hbox.set_size_request(-1, 500)
+        hbox.pack_start(self.embed, True, True, True)
+        hbox.pack_start(self._vscrollbar, False, True, False)
+
+        vbox.pack_end(hbox, True, True, True)
         vbox.pack_end(self.ruler, False, True, False)
-        
 
     def _updateScrollPosition(self, adjustment):
         self._scroll_pos_ns = Zoomable.pixelToNs(self.hadj.get_value())
         point = Clutter.Point()
         point.x = self.hadj.get_value()
-        point.y = 0
+        point.y = self.vadj.get_value()
+        self.point = point
         self.timeline.scroll_to_point(point)
 
     def zoomChanged(self):
