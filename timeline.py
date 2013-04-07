@@ -77,7 +77,7 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
     def updateGhostclip(self, priority, y, isControlledByBrother):
         # Only tricky part of the code, can be called by the linked track element.
-        self.ghostclip.props.x = self.props.x
+#        self.ghostclip.props.x = self.props.x
 
         if priority < 0:
             return
@@ -194,12 +194,18 @@ class TimelineElement(Clutter.Actor, Zoomable):
         y = coords[1] + self.timeline._container.point.y
 
         priority = self._getLayerForY(y)
+        self.ghostclip.props.x = self.nsToPixel(self._dragBeginStart) + delta_x
         self.updateGhostclip(priority, y, False)
         if self.brother:
+            self.brother.ghostclip.props.x = self.nsToPixel(self._dragBeginStart) + delta_x
             self.brother.updateGhostclip(priority, y, True)
 
         new_start = self._dragBeginStart + self.pixelToNs(delta_x)
-        self._context.editTo(new_start, self.bElement.get_parent().get_layer().get_priority())
+
+        if not self.ghostclip.props.visible:
+            self._context.editTo(new_start, self.bElement.get_parent().get_layer().get_priority())
+        else:
+            self._context.editTo(self._dragBeginStart, self.bElement.get_parent().get_layer().get_priority())
         return False
 
     def _dragEndCb(self, action, actor, event_x, event_y, modifiers):
@@ -305,7 +311,9 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         bElement.disconnect_by_func("notify::in-point", self._elementInPointChangedCb)
 
     def _setElementX(self, element):
+        element.save_easing_state()
         element.props.x = self.nsToPixel(element.bElement.get_start())
+        element.restore_easing_state()
 
     # Crack, change that when we have retractable layers
     def _setElementY(self, element):
