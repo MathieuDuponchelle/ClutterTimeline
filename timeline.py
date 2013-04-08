@@ -77,8 +77,6 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
     def updateGhostclip(self, priority, y, isControlledByBrother):
         # Only tricky part of the code, can be called by the linked track element.
-#        self.ghostclip.props.x = self.props.x
-
         if priority < 0:
             return
 
@@ -194,6 +192,7 @@ class TimelineElement(Clutter.Actor, Zoomable):
         y = coords[1] + self.timeline._container.point.y
 
         priority = self._getLayerForY(y)
+
         self.ghostclip.props.x = self.nsToPixel(self._dragBeginStart) + delta_x
         self.updateGhostclip(priority, y, False)
         if self.brother:
@@ -333,9 +332,12 @@ class Timeline(Clutter.ScrollActor, Zoomable):
     # Interface overrides (Zoomable)
 
     def zoomChanged(self):
-        self.props.width = self.nsToPixel(self.bTimeline.get_duration())
+        self.save_easing_state()
+        self.set_easing_duration(0)
+        self.props.width = self.nsToPixel(self.bTimeline.get_duration()) + 250
         for element in self.elements:
             self._setElementX(element)
+        self.restore_easing_state()
 
     # Callbacks
 
@@ -479,6 +481,8 @@ class TimelineTest(Zoomable):
 
         self.stage = stage
 
+        self.embed.connect("scroll-event", self._scrollEventCb)
+
         self.stage.set_throttle_motion_events(True)
 
         self.window.maximize()
@@ -516,6 +520,7 @@ class TimelineTest(Zoomable):
 
         self.vadj.props.lower = 0
         self.vadj.props.upper = 500
+        self.vadj.props.page_size = 250
 
         hbox = Gtk.HBox()
         hbox.set_size_request(-1, 500)
@@ -530,6 +535,7 @@ class TimelineTest(Zoomable):
         point = Clutter.Point()
         point.x = self.hadj.get_value()
         point.y = self.vadj.get_value()
+        print point.y
         self.point = point
         self.timeline.scroll_to_point(point)
 
@@ -567,6 +573,22 @@ class TimelineTest(Zoomable):
         self.testTimeline(self.timeline)
         GLib.io_add_watch(sys.stdin, GLib.IO_IN, quit2_)
         Gtk.main()
+
+    def _scrollLeft(self):
+        self._hscrollBar.set_value(self._hscrollBar.get_value() -
+            self.hadj.props.page_size ** (2.0 / 3.0))
+
+    def _scrollRight(self):
+        self._hscrollBar.set_value(self._hscrollBar.get_value() +
+            self.hadj.props.page_size ** (2.0 / 3.0))
+
+    def _scrollUp(self):
+        self._vscrollbar.set_value(self._vscrollbar.get_value() -
+            self.vadj.props.page_size ** (2.0 / 3.0))
+
+    def _scrollDown(self):
+        self._vscrollbar.set_value(self._vscrollbar.get_value() +
+            self.vadj.props.page_size ** (2.0 / 3.0))
 
     def goToPoint(self, timeline):
         point = Clutter.Point()
@@ -618,6 +640,25 @@ class TimelineTest(Zoomable):
         self.timeline.setPipeline(self.pipeline)
         GObject.timeout_add(1000, self.doSeek)
         Zoomable.setZoomLevel(50)
+
+    def _scrollEventCb(self, embed, event):
+        # FIXME : see https://bugzilla.gnome.org/show_bug.cgi?id=697522
+        deltas = event.get_scroll_deltas()
+        if event.state & Gdk.ModifierType.CONTROL_MASK:
+            if deltas[2] < 0:
+                Zoomable.zoomIn()
+            elif deltas[2] > 0:
+                Zoomable.zoomOut()
+        elif event.state & Gdk.ModifierType.SHIFT_MASK:
+            if deltas[2] > 0:
+                self._scrollDown()
+            elif deltas[2] < 0:
+                self._scrollUp()
+        else:
+            if deltas[2] > 0:
+                self._scrollRight()
+            elif deltas[2] < 0:
+                self._scrollLeft()
 
     def testTimeline(self, timeline):
         timeline.set_easing_duration(600)
