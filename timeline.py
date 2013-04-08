@@ -394,12 +394,14 @@ def quit2_(*args, **kwargs):
     Gtk.main_quit()
 
 class ZoomBox(Gtk.HBox, Zoomable):
-    def __init__(self):
+    def __init__(self, timeline):
         """
         This will hold the widgets responsible for zooming.
         """
         Gtk.HBox.__init__(self)
         Zoomable.__init__(self)
+
+        self.timeline = timeline
 
         zoom_fit_btn = Gtk.Button()
         zoom_fit_btn.set_relief(Gtk.ReliefStyle.NONE)
@@ -438,7 +440,7 @@ class ZoomBox(Gtk.HBox, Zoomable):
         self._updateZoomSlider = True
 
     def _zoomFitCb(self, button):
-        pass
+        self.timeline.zoomFit()
 
     def _zoomSliderScrollCb(self, unused, event):
         value = self._zoomAdjustment.get_value()
@@ -465,7 +467,7 @@ class TimelineTest(Zoomable):
         self.point.x = 0
         self.point.y = 0
 
-        self.zoomBox = ZoomBox()
+        self.zoomBox = ZoomBox(self)
         vbox.pack_end(self.zoomBox, False, False, False)
 
         self._packScrollbars(vbox)
@@ -535,7 +537,6 @@ class TimelineTest(Zoomable):
         point = Clutter.Point()
         point.x = self.hadj.get_value()
         point.y = self.vadj.get_value()
-        print point.y
         self.point = point
         self.timeline.scroll_to_point(point)
 
@@ -573,6 +574,40 @@ class TimelineTest(Zoomable):
         self.testTimeline(self.timeline)
         GLib.io_add_watch(sys.stdin, GLib.IO_IN, quit2_)
         Gtk.main()
+
+    def _setBestZoomRatio(self):
+        """
+        Set the zoom level so that the entire timeline is in view.
+        """
+        ruler_width = self.ruler.get_allocation().width
+        # Add Gst.SECOND - 1 to the timeline duration to make sure the
+        # last second of the timeline will be in view.
+        duration = self.timeline.bTimeline.get_duration()
+        if duration == 0:
+            self.debug("The timeline duration is 0, impossible to calculate zoom")
+            return
+
+        timeline_duration = duration + Gst.SECOND - 1
+        timeline_duration_s = int(timeline_duration / Gst.SECOND)
+
+        #self.debug("duration: %s, timeline duration: %s" % (print_ns(duration),
+    #       print_ns(timeline_duration)))
+
+        ideal_zoom_ratio = float(ruler_width) / timeline_duration_s
+        nearest_zoom_level = Zoomable.computeZoomLevel(ideal_zoom_ratio)
+        #self.debug("Ideal zoom: %s, nearest_zoom_level %s", ideal_zoom_ratio, nearest_zoom_level)
+        Zoomable.setZoomLevel(nearest_zoom_level)
+        #self.timeline.props.snapping_distance = \
+        #    Zoomable.pixelToNs(self.app.settings.edgeSnapDeadband)
+
+        # Only do this at the very end, after updating the other widgets.
+        #self.log("Setting 'zoomed_fitted' to True")
+        self.zoomed_fitted = True
+
+
+    def zoomFit(self):
+        self._hscrollBar.set_value(0)
+        self._setBestZoomRatio()
 
     def _scrollLeft(self):
         self._hscrollBar.set_value(self._hscrollBar.get_value() -
