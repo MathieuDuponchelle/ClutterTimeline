@@ -23,10 +23,13 @@ from gettext import gettext as _
 
 from pipeline import Pipeline
 
+from layer import VideoLayerControl, AudioLayerControl
+
 # CONSTANTS
 
-EXPANDED_SIZE = 50
+EXPANDED_SIZE = 65
 SPACING = 10
+CONTROL_WIDTH = 250
 
 BORDER_WIDTH = 3 #For the timeline elements
 
@@ -329,15 +332,19 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         element.props.y = y
         element.restore_easing_state()
 
-    # Interface overrides (Zoomable)
-
-    def zoomChanged(self):
+    def _redraw(self):
         self.save_easing_state()
         self.set_easing_duration(0)
         self.props.width = self.nsToPixel(self.bTimeline.get_duration()) + 250
         for element in self.elements:
             self._setElementX(element)
         self.restore_easing_state()
+
+
+    # Interface overrides (Zoomable)
+
+    def zoomChanged(self):
+        self._redraw()
 
     # Callbacks
 
@@ -346,8 +353,10 @@ class Timeline(Clutter.ScrollActor, Zoomable):
             self._setElementY(element)
         layer.connect("clip-added", self._clipAddedCb)
         layer.connect("clip-removed", self._clipRemovedCb)
+        layer.connect("notify::priority", self._layerPriorityChangedCb)
         self.props.height = (len(self.bTimeline.get_layers()) + 1) * (EXPANDED_SIZE + SPACING) * 2 + SPACING
         self._container.vadj.props.upper = self.props.height
+        self._container.addLayerControl(layer)
         self._updatePlayHead()
 
     def _layerRemovedCb(self, timeline, layer):
@@ -386,6 +395,9 @@ class Timeline(Clutter.ScrollActor, Zoomable):
 
     def _elementInPointChangedCb(self, bElement, inpoint, element):
         pass
+
+    def _layerPriorityChangedCb(self, layer, priority):
+        self._redraw()
 
 def quit_(stage):
     Gtk.main_quit()
@@ -453,8 +465,50 @@ class ZoomBox(Gtk.HBox, Zoomable):
         if self._updateZoomSlider:
             self._zoomAdjustment.set_value(self.getCurrentZoomLevel())
 
+class ControlActor(GtkClutter.Actor):
+    def __init__(self, container, widget, layer):
+        GtkClutter.Actor.__init__(self)
+        self.get_widget().add(widget)
+        self.set_reactive(True)
+        self.layer = layer
+        self._setUpDragAndDrop()
+        self._container = container
+
+    def _getLayerForY(self, y):
+        if self.isAudio:
+            y -= self.nbrLayers * (EXPANDED_SIZE + SPACING)
+        priority = int(y / (EXPANDED_SIZE + SPACING))
+        return priority
+
+    def _setUpDragAndDrop(self):
+        self.dragAction = Clutter.DragAction()
+        self.add_action(self.dragAction)
+        self.dragAction.connect("drag-begin", self._dragBeginCb)
+        self.dragAction.connect("drag-progress", self._dragProgressCb)
+        self.dragAction.connect("drag-end", self._dragEndCb)
+
+    def _dragBeginCb(self, action, actor, event_x, event_y, modifiers):
+        self.nbrLayers = len(self._container.timeline.bTimeline.get_layers())
+        self._dragBeginStartX = event_x
+
+    def _dragProgressCb(self, action, actor, delta_x, delta_y):
+        y = self.dragAction.get_motion_coords()[1]
+        priority = self._getLayerForY(y)
+        if self.layer.get_priority() != priority:
+            self._container.highlightSeparator(priority)
+        else:
+            self._container.highlightSeparator(1000)
+        return False
+
+    def _dragEndCb(self, action, actor, event_x, event_y, modifiers):
+        priority = self._getLayerForY(event_y)
+        if self.layer.get_priority() != priority and priority >= 0 and priority < self.nbrLayers:
+            self._container.moveLayer(self, priority)
+
 class TimelineTest(Zoomable):
     def __init__(self):
+        gtksettings = Gtk.Settings.get_default()
+        gtksettings.set_property("gtk-application-prefer-dark-theme", True)
         Zoomable.__init__(self)
         GObject.threads_init()
         self.window = Gtk.Window()
@@ -462,6 +516,9 @@ class TimelineTest(Zoomable):
         self.embed.show()
         vbox = Gtk.VBox()
         self.window.add(vbox)
+
+        self.controlActors = []
+        self.trackControls = []
 
         self.point = Clutter.Point()
         self.point.x = 0
@@ -494,11 +551,79 @@ class TimelineTest(Zoomable):
         widget = Timeline(self)
 
         stage.add_child(widget)
+        widget.set_position(CONTROL_WIDTH, 0)
         stage.connect("destroy", quit_)
         stage.connect("button-press-event", self._clickedCb)
         self.timeline = widget
 
         self.window.show_all()
+
+    def _setTrackControlPosition(self, control):
+        y = control.layer.get_priority() * (EXPANDED_SIZE + SPACING) + SPACING
+        if control.isAudio:
+            y += len(self.timeline.bTimeline.get_layers()) * (EXPANDED_SIZE + SPACING)
+        control.set_position(0, y)
+
+    def _reorderLayerActors(self):
+        for control in self.controlActors: 
+            control.save_easing_state()
+            control.set_easing_mode(Clutter.AnimationMode.EASE_OUT_BACK)
+            self._setTrackControlPosition(control)
+            control.restore_easing_state()
+
+    def moveLayer(self, control, target):
+        movedLayer = control.layer
+        priority = movedLayer.get_priority()
+        self.timeline.bTimeline.enable_update(False)
+        movedLayer.props.priority = 999
+
+        if priority > target:
+            for layer in self.timeline.bTimeline.get_layers():
+                prio = layer.get_priority()
+                if target <= prio < priority:
+                    layer.props.priority = prio + 1
+        elif priority < target:
+            for layer in self.timeline.bTimeline.get_layers():
+                prio = layer.get_priority()
+                if priority < prio <= target:
+                    layer.props.priority = prio - 1
+        movedLayer.props.priority = target
+        self.highlightSeparator(1000)
+
+        self._reorderLayerActors()
+        self.timeline.bTimeline.enable_update(True)
+
+    def addTrackControl(self, layer, isAudio):
+        if isAudio:
+            control = AudioLayerControl(self, layer)
+        else:
+            control = VideoLayerControl(self, layer)
+
+        controlActor = ControlActor(self, control, layer)
+        controlActor.isAudio = isAudio
+        controlActor.layer = layer
+        controlActor.set_size(CONTROL_WIDTH, EXPANDED_SIZE + SPACING)
+
+        self.stage.add_child(controlActor)
+        self.trackControls.append(control)
+        self.controlActors.append(controlActor)
+
+    def highlightSeparator(self, priority):
+        for control in self.trackControls:
+            if control.layer.get_priority() == priority:
+                control.setSeparatorHighlight(True)
+            else:
+                control.setSeparatorHighlight(False)
+
+    def selectLayerControl(self, layer_control):
+        for control in self.trackControls:
+            control.selected = False
+        layer_control.selected = True
+
+    def addLayerControl(self, layer):
+        self.addTrackControl(layer, False)
+        self.addTrackControl(layer, True)
+        self._reorderLayerActors()
 
     def _packScrollbars(self, vbox):
         self.hadj = Gtk.Adjustment()
@@ -517,6 +642,7 @@ class TimelineTest(Zoomable):
         vbox.pack_end(self._hscrollBar, False, True, False)
 
         self.ruler = ScaleRuler(self, self.hadj)
+        self.ruler.setProjectFrameRate(24.)
 
         self.ruler.set_size_request(0, 25)
 
@@ -530,7 +656,14 @@ class TimelineTest(Zoomable):
         hbox.pack_start(self._vscrollbar, False, True, False)
 
         vbox.pack_end(hbox, True, True, True)
-        vbox.pack_end(self.ruler, False, True, False)
+
+        hbox = Gtk.HBox()
+        label = Gtk.Label("layer controls")
+        label.set_size_request(CONTROL_WIDTH, -1)
+        hbox.pack_start(label, False, True, False)
+        hbox.pack_start(self.ruler, True, True, True)
+
+        vbox.pack_end(hbox, False, True, False)
 
     def _updateScrollPosition(self, adjustment):
         self._scroll_pos_ns = Zoomable.pixelToNs(self.hadj.get_value())
