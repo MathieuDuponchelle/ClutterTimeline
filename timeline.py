@@ -55,6 +55,9 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
         self._createBackground(track)
 
+        self.preview = Preview(bElement)
+        self.add_child(self.preview)
+
         self._createMarquee()
 
         self._createGhostclip()
@@ -74,6 +77,7 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
     def set_size(self, width, height):
         self.marquee.set_size(width, height)
+        self.preview.set_size(width, height)
         self.props.width = width
         self.props.height = height
 
@@ -846,6 +850,34 @@ class TimelineTest(Zoomable):
 
         self.project.connect("asset-added", self._doAssetAddedCb, layer)
         self.project.create_asset("file://" + sys.argv[1], GES.UriClip)
+
+class Preview(Clutter.ScrollActor, Zoomable):
+    def __init__(self, bElement):
+        """
+        @param bElement : the backend GES.TrackElement
+        @param track : the track to which the bElement belongs
+        @param timeline : the containing graphic timeline.
+        """
+        Zoomable.__init__(self)
+        Clutter.ScrollActor.__init__(self)
+
+        self.set_scroll_mode(Clutter.ScrollMode.HORIZONTALLY)
+
+        self.bElement = bElement
+
+        self.track_type = self.bElement.get_track_type() # This won't change
+
+        self.thumb_margin = 5
+        self.thumb_height = EXPANDED_SIZE - 2 * self.thumb_margin
+        self.thumb_width = 4 * self.thumb_height / 3
+
+        if self.track_type == GES.TrackType.VIDEO:
+            for i in range(0, 18):
+                actor = Clutter.Actor()
+                actor.set_background_color(Clutter.Color.new(0, 100, 150, 100))
+                actor.set_size(self.thumb_width, self.thumb_height)
+                actor.set_position(i*(self.thumb_width + self.thumb_margin), self.thumb_margin)
+                self.add_child(actor)
 
 if __name__ == "__main__":
     # Basic argument handling, no need for getopt here
