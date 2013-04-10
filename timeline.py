@@ -73,7 +73,6 @@ class TimelineElement(Clutter.Actor, Zoomable):
     # Public API
 
     def set_size(self, width, height):
-        self.background.set_size(width, height)
         self.marquee.set_size(width, height)
         self.props.width = width
         self.props.height = height
@@ -117,26 +116,24 @@ class TimelineElement(Clutter.Actor, Zoomable):
     # Internal API
 
     def _createGhostclip(self):
-        self.ghostclip = Clutter.Rectangle.new()
-        self.ghostclip.set_border_width(3)
-        self.ghostclip.set_border_color(Clutter.Color.new(100, 100, 100, 255))
-        self.ghostclip.set_color(Clutter.Color.new(100, 100, 100, 50))
+        self.ghostclip = Clutter.Actor.new()
+        # TODO: border is missing. Add it or leave it out?
+        self.ghostclip.set_background_color(Clutter.Color.new(100, 100, 100, 50))
         self.ghostclip.props.visible = False
         self.timeline.add_child(self.ghostclip)
 
     def _createBackground(self, track):
-        self.background = Clutter.Rectangle()
+        # TODO: border is missing. Add it or leave it out?
+        # TODO: which style to use? props or setter?
         if track.type == GES.TrackType.AUDIO:
-            self.background.set_color(Clutter.Color.new(70, 97, 118, 255))
+            self.props.background_color = Clutter.Color.new(70, 79, 118, 255)
         else:
-            self.background.set_color(Clutter.Color.new(225, 232, 238, 255))
-        self.background.set_border_width(BORDER_WIDTH)
-        self.background.set_border_color(Clutter.Color.new(100, 100, 100, 255))
-        self.add_child(self.background)
+            self.set_background_color(Clutter.Color.new(225, 232, 238, 255))
 
     def _createMarquee(self):
-        self.marquee = Clutter.Rectangle()
-        self.marquee.set_color(Clutter.Color.new(60, 60, 60, 100))
+        # TODO: difference between Actor.new() and Actor()?
+        self.marquee = Clutter.Actor()
+        self.marquee.set_background_color(Clutter.Color.new(60, 60, 60, 100))
         self.add_child(self.marquee)
         self.marquee.props.visible = False
 
@@ -284,8 +281,8 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         self.playhead.set_size(2, height)
 
     def _createPlayhead(self):
-        self.playhead = Clutter.Rectangle()
-        self.playhead.set_color(Clutter.Color.new(200, 0, 0, 255))
+        self.playhead = Clutter.Actor()
+        self.playhead.set_background_color(Clutter.Color.new(200, 0, 0, 255))
         self.playhead.set_size(0, 0)
         self.playhead.set_position(0, 0)
         self.add_child(self.playhead)
