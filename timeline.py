@@ -1038,29 +1038,20 @@ class VideoPreviewer(Clutter.Actor, Zoomable):
         self.pipeline = Gst.ElementFactory.make("playbin", None)
         self.pipeline.props.uri = self.uri
         self.pipeline.props.flags = 1 # Only render video
-        self.pipeline.get_bus().add_signal_watch()
-        self.pipeline.get_bus().connect("message", self.bus_message_handler)
 
-        # Use a capsfilter to scale the video to the desired size
-        # (fixed height and pixel aspect ratio, variable width)
-        type = "video/x-raw, height=(int)%d, pixel-aspect-ratio=(fraction)1/1" % self.thumb_height
-        caps = Gst.caps_from_string(type)
-        capsfilter = Gst.ElementFactory.make("capsfilter", "thumbnailcapsfilter")
-        capsfilter.props.caps = caps
+        # Set up the thumbnailsink
+        thumbnailsink = Gst.parse_bin_from_description("capsfilter caps=video/x-raw,format=(string)RGB,pixel-aspect-ratio=(fraction)1/1 ! gdkpixbufsink name=gdkpixbufsink", True)
 
-        # Create the gdkpixbufsink
-        self.gdkpixbufsink = Gst.ElementFactory.make("gdkpixbufsink", None)
-
-        # Set up the thumbnailsink and add a sink pad
-        thumbnailsink = Gst.Bin(name="thumbnailsink")
-        thumbnailsink.add(capsfilter)
-        thumbnailsink.add(self.gdkpixbufsink)
-        capsfilter.link(self.gdkpixbufsink)
-        sinkpad = Gst.GhostPad.new(name="sink", target=(thumbnailsink.find_unlinked_pad(Gst.PadDirection.SINK)))
-        thumbnailsink.add_pad(sinkpad)
+        # get the gdkpixbufsink and the automatically created ghostpad
+        self.gdkpixbufsink = thumbnailsink.get_by_name("gdkpixbufsink")
+        sinkpad = thumbnailsink.get_static_pad("sink")
 
         # Connect the playbin and the thumbnailsink
         self.pipeline.props.video_sink = thumbnailsink
+
+        # add a message handler that listens for the created pixbufs
+        self.pipeline.get_bus().add_signal_watch()
+        self.pipeline.get_bus().connect("message", self.bus_message_handler)
 
         self.pipeline.set_state(Gst.State.PAUSED)
         # Wait for the pipeline to be prerolled so we can check the width
@@ -1069,14 +1060,14 @@ class VideoPreviewer(Clutter.Actor, Zoomable):
         change_return = self.pipeline.get_state(Gst.CLOCK_TIME_NONE)
         if Gst.StateChangeReturn.SUCCESS == change_return[0]:
             neg_caps = sinkpad.get_current_caps()[0]
-            self.thumb_width = neg_caps["width"]
-            self.framerate = neg_caps["framerate"]
+            video_width = neg_caps["width"]
+            video_height = neg_caps["height"]
+            self.thumb_width = video_width * self.thumb_height / video_height
         else:
             # the pipeline couldn't be prerolled so we can't determine the
             # correct values. Set sane defaults (this should never happen)
             self.warning("Couldn't preroll the pipeline")
             self.thumb_width = 16 * self.thumb_height / 9 # assume 16:9 aspect ratio
-            self.framerate = Gst.Fraction(24, 1) # assume 24fps
 
     def _addThumbnails(self):
         """
@@ -1157,10 +1148,12 @@ class VideoPreviewer(Clutter.Actor, Zoomable):
         if time != waiting:
             time = waiting
 
-        self.thumb_cache[time] = gdkpixbuf
+        thumbnail = gdkpixbuf.scale_simple(self.thumb_width, self.thumb_height, 3)
+
+        self.thumb_cache[time] = thumbnail
 
         if time in self.thumbs:
-            self.thumbs[time].set_from_gdkpixbuf(gdkpixbuf)
+            self.thumbs[time].set_from_gdkpixbuf(thumbnail)
         #self.emit("update", time)
 
         if time in self.queue:
@@ -1183,12 +1176,6 @@ class VideoPreviewer(Clutter.Actor, Zoomable):
     # Callbacks
 
     def bus_message_handler(self, unused_bus, message):
-        # set the scaling method of the videoscale element to Lanczos
-        #element = message.src
-        #if isinstance(element, Gst.Element):
-        #    factory = element.get_factory()
-        #    if factory and "GstVideoScale" == factory.get_element_type().name:
-        #        element.props.method = 3
         if message.type == Gst.MessageType.ELEMENT and \
                 message.src == self.gdkpixbufsink:
             struct = message.get_structure()
