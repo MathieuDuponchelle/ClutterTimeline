@@ -76,10 +76,13 @@ class TimelineElement(Clutter.Actor, Zoomable):
     # Public API
 
     def set_size(self, width, height):
+        self.save_easing_state()
+        self.set_easing_duration(600)
         self.marquee.set_size(width, height)
         self.preview.set_size(width, height)
         self.props.width = width
         self.props.height = height
+        self.restore_easing_state()
 
     def updateGhostclip(self, priority, y, isControlledByBrother):
         # Only tricky part of the code, can be called by the linked track element.
@@ -315,6 +318,7 @@ class Timeline(Clutter.ScrollActor, Zoomable):
 
     def _setElementX(self, element):
         element.save_easing_state()
+        element.set_easing_duration(600)
         element.props.x = self.nsToPixel(element.bElement.get_start())
         element.restore_easing_state()
 
@@ -557,7 +561,9 @@ class TimelineTest(Zoomable):
         stage.connect("button-press-event", self._clickedCb)
         self.timeline = widget
 
+        self.scrolled = 0
         self.window.show_all()
+        self.ruler.hide()
 
     def _setTrackControlPosition(self, control):
         y = control.layer.get_priority() * (EXPANDED_SIZE + SPACING) + SPACING
@@ -646,6 +652,7 @@ class TimelineTest(Zoomable):
         self.ruler.setProjectFrameRate(24.)
 
         self.ruler.set_size_request(0, 25)
+        self.ruler.hide()
 
         self.vadj.props.lower = 0
         self.vadj.props.upper = 500
@@ -828,6 +835,7 @@ class TimelineTest(Zoomable):
                 self._scrollRight()
             elif deltas[2] < 0:
                 self._scrollLeft()
+        self.scrolled += 1
 
     def testTimeline(self, timeline):
         timeline.set_easing_duration(600)
