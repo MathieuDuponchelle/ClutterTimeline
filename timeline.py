@@ -348,7 +348,7 @@ class Timeline(Clutter.ScrollActor, Zoomable):
 
     def _redraw(self):
         self.save_easing_state()
-        self.set_easing_duration(0)
+#        self.set_easing_duration(0)
         self.props.width = self.nsToPixel(self.bTimeline.get_duration()) + 250
         for element in self.elements:
             self._setElementX(element)
@@ -363,12 +363,9 @@ class Timeline(Clutter.ScrollActor, Zoomable):
     # Callbacks
 
     def _layerAddedCb(self, timeline, layer):
-        for element in self.elements:
-            self._setElementY(element)
-        layer.connect("clip-added", self._clipAddedCb)
-        layer.connect("clip-removed", self._clipRemovedCb)
-        layer.connect("notify::priority", self._layerPriorityChangedCb)
+        self.save_easing_state()
         self.props.height = (len(self.bTimeline.get_layers()) + 1) * (EXPANDED_SIZE + SPACING) * 2 + SPACING
+        self.restore_easing_state()
         self._container.vadj.props.upper = self.props.height
         self._container.addLayerControl(layer)
         self._updatePlayHead()
@@ -925,6 +922,8 @@ class VideoPreviewer(Clutter.ScrollActor, Zoomable):
 
         self._setupPipeline();
 
+        self.callback_id = None
+
     # Internal API
 
     def _setupPipeline(self):
@@ -1069,8 +1068,15 @@ class VideoPreviewer(Clutter.ScrollActor, Zoomable):
 
     # Interface (Zoomable)
 
-    def zoomChanged(self):
+    def _maybeUpdate(self):
         self._addThumbnails()
+        self.callback_id = None
+        return False
+
+    def zoomChanged(self):
+        if self.callback_id is not None:
+            GObject.source_remove(self.callback_id)
+        self.callback_id = GObject.timeout_add(100, self._maybeUpdate)
 
     # Callbacks
 
