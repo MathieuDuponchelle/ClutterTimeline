@@ -47,6 +47,71 @@ Every GES element which name could be mistaken with a UI element
 is prefixed with a little b, example : bTimeline
 """
 
+class RoundedRectangle(Clutter.Actor):
+    """
+    Custom actor used to draw a rectangle that can have rounded corners
+    """
+    __gtype_name__ = 'RoundedRectangle'
+
+    def __init__(self, width, height, arc, step, 
+        color=None, border_color=None, border_width=0):
+        """
+        Creates a new rounded rectangle
+        """
+        Clutter.Actor.__init__(self)
+        self.props.width = width
+        self.props.height = height
+        self._arc = arc
+        self._step = step
+        self._border_width = border_width
+
+    def do_paint(self):
+
+        # Draw a rectangle for the clipping
+        Cogl.path_round_rectangle(0, 0, self.props.width, self.props.height, self._arc, self._step)
+        Cogl.path_close()
+        # Start the clip
+        Cogl.clip_push_rectangle(0, 0, self.props.width, self.props.height)
+
+        # set color to border color
+        Cogl.set_source_color(self._border_color)
+        # draw the rectangle for the border which is the same size and the
+        # object
+        # color the path usign the border color
+        Cogl.path_fill()
+        # set the color of the filled area
+        Cogl.set_source_color(self._color)
+        # draw the content with is the same size minus the wirth of the border
+        # finish the clip
+        Cogl.path_round_rectangle(self._border_width, self._border_width, 
+            self.props.width - self._border_width, 
+            self.props.height - self._border_width, self._arc, self._step)
+        Cogl.path_fill() 
+        Cogl.path_close()
+        
+        Cogl.clip_pop()
+
+    def get_color(self):
+        return self._color
+        
+    def set_color(self, color):
+        self._color = color
+        self.queue_redraw()
+        
+    def get_border_width(self):
+        return self._border_width
+        
+    def set_border_width(self, width):
+        self._border_width = width
+        self.queue_redraw()
+        
+    def get_border_color(color):
+        return self._border_color
+        
+    def set_border_color(self, color):
+        self._border_color = color
+        self.queue_redraw()
+
 class TimelineElement(Clutter.Actor, Zoomable):
     def __init__(self, bElement, track, timeline):
         """
@@ -84,12 +149,17 @@ class TimelineElement(Clutter.Actor, Zoomable):
         self.save_easing_state()
         self.set_easing_duration(600)
         self.marquee.set_size(width, height)
+        self.background.save_easing_state()
+        self.background.set_easing_duration(600)
+        self.background.props.width = width
+        self.background.props.height = height
+        self.background.restore_easing_state()
+        self.props.width = width
+        self.props.height = height
         self.preview.save_easing_state()
         self.preview.set_easing_duration(600)
         self.preview.set_size(width, height)
         self.preview.restore_easing_state()
-        self.props.width = width
-        self.props.height = height
         self.restore_easing_state()
 
     def updateGhostclip(self, priority, y, isControlledByBrother):
@@ -132,18 +202,27 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
     def _createGhostclip(self):
         self.ghostclip = Clutter.Actor.new()
-        # TODO: border is missing. Add it or leave it out?
         self.ghostclip.set_background_color(Clutter.Color.new(100, 100, 100, 50))
         self.ghostclip.props.visible = False
         self.timeline.add_child(self.ghostclip)
 
     def _createBackground(self, track):
-        # TODO: border is missing. Add it or leave it out?
-        # TODO: which style to use? props or setter?
+        self.background = RoundedRectangle(0, 0, 5, 5)
         if track.type == GES.TrackType.AUDIO:
-            self.props.background_color = Clutter.Color.new(70, 79, 118, 255)
+            color = Cogl.Color()
+            color.init_from_4ub(70, 79, 118, 255)
+            self.background.set_color(color)
         else:
-            self.set_background_color(Clutter.Color.new(225, 232, 238, 255))
+            color = Cogl.Color()
+            color.init_from_4ub(225, 232, 238, 255)
+            self.background.set_color(color)
+
+        color = Cogl.Color()
+        color.init_from_4ub(100, 100, 100, 255)
+        self.background.set_border_color(color)
+        self.background.set_border_width(3)
+        self.background.set_position(0, 0)
+        self.add_child(self.background)
 
     def _createPreview(self):
         self.preview = get_preview_for_object(self.bElement)
