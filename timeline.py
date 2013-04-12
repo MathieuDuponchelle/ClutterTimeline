@@ -84,7 +84,10 @@ class TimelineElement(Clutter.Actor, Zoomable):
         self.save_easing_state()
         self.set_easing_duration(600)
         self.marquee.set_size(width, height)
+        self.preview.save_easing_state()
+        self.preview.set_easing_duration(600)
         self.preview.set_size(width, height)
+        self.preview.restore_easing_state()
         self.props.width = width
         self.props.height = height
         self.restore_easing_state()
@@ -909,9 +912,11 @@ class VideoPreviewer(Clutter.Actor, Zoomable):
 
         self.uri = bElement.props.uri
 
+        self.layoutManager = Clutter.BinLayout()
+        self.set_layout_manager(self.layoutManager)
+
         self.bElement = bElement
 
-        # TODO: do these connections work?
         self.bElement.connect("notify::duration", self.element_changed)
         self.bElement.connect("notify::in-point", self.element_changed)
 
