@@ -512,9 +512,11 @@ class ControlActor(GtkClutter.Actor):
         lowerLimit = 0
         if self.isAudio:
             lowerLimit = self.nbrLayers * (EXPANDED_SIZE + SPACING)
+
         if actor.props.y + delta_y > lowerLimit and priority < self.nbrLayers:
             actor.move_by(0, delta_y)
             self.brother.move_by(0, delta_y)
+
         if self.layer.get_priority() != priority and priority >= 0 and priority < self.nbrLayers:
             self._container.moveLayer(self, priority)
         return False
@@ -895,7 +897,7 @@ def get_preview_for_object(bElement):
     else:
         return Clutter.Actor()
 
-class VideoPreviewer(Clutter.ScrollActor, Zoomable):
+class VideoPreviewer(Clutter.Actor, Zoomable):
     def __init__(self, bElement):
         """
         @param bElement : the backend GES.TrackElement
@@ -903,9 +905,7 @@ class VideoPreviewer(Clutter.ScrollActor, Zoomable):
         @param timeline : the containing graphic timeline.
         """
         Zoomable.__init__(self)
-        Clutter.ScrollActor.__init__(self)
-
-        self.set_scroll_mode(Clutter.ScrollMode.HORIZONTALLY)
+        Clutter.Actor.__init__(self)
 
         self.uri = bElement.props.uri
 
@@ -923,7 +923,7 @@ class VideoPreviewer(Clutter.ScrollActor, Zoomable):
         # self.thumb_width will be set by self._setupPipeline()
 
         # TODO: read this property from the settings
-        self.thumb_period = 1 * 10**9 # 1 second in nanoseconds
+        self.thumb_period = long(0.1 * Gst.SECOND)
 
         # maps (quantized) times to Thumbnail objects
         self.thumbs = {}
