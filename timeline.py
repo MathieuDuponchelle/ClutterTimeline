@@ -64,30 +64,41 @@ class RoundedRectangle(Clutter.Actor):
         self._arc = arc
         self._step = step
         self._border_width = border_width
+        self._color = color
+        self._border_color = border_color
 
     def do_paint(self):
-
-        # Draw a rectangle for the clipping
-        Cogl.path_round_rectangle(0, 0, self.props.width, self.props.height, self._arc, self._step)
-        Cogl.path_close()
-        # Start the clip
+        # Set a rectangle for the clipping
         Cogl.clip_push_rectangle(0, 0, self.props.width, self.props.height)
 
-        # set color to border color
-        Cogl.set_source_color(self._border_color)
-        # draw the rectangle for the border which is the same size and the
-        # object
-        # color the path usign the border color
-        Cogl.path_fill()
-        # set the color of the filled area
-        Cogl.set_source_color(self._color)
-        # draw the content with is the same size minus the wirth of the border
-        # finish the clip
-        Cogl.path_round_rectangle(self._border_width, self._border_width, 
-            self.props.width - self._border_width, 
-            self.props.height - self._border_width, self._arc, self._step)
-        Cogl.path_fill() 
-        Cogl.path_close()
+        if self._border_color:
+            # draw the rectangle for the border which is the same size as the
+            # object
+            Cogl.path_round_rectangle(0, 0, self.props.width, self.props.height, 
+                                      self._arc, self._step)
+            Cogl.path_round_rectangle(self._border_width, self._border_width,
+                                      self.props.width - self._border_width,
+                                      self.props.height - self._border_width, 
+                                      self._arc, self._step)
+            Cogl.path_set_fill_rule(Cogl.PathFillRule.EVEN_ODD)
+            Cogl.path_close()
+
+            # set color to border color
+            Cogl.set_source_color(self._border_color)
+            Cogl.path_fill()
+
+        if self._color:
+            # draw the content with is the same size minus the width of the border
+            # finish the clip
+            Cogl.path_round_rectangle(self._border_width, self._border_width, 
+                                      self.props.width - self._border_width, 
+                                      self.props.height - self._border_width,
+                                      self._arc, self._step)
+            Cogl.path_close()
+
+            # set the color of the filled area
+            Cogl.set_source_color(self._color)
+            Cogl.path_fill()
         
         Cogl.clip_pop()
 
@@ -130,6 +141,8 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
         self._createPreview()
 
+        self._createBorder()
+
         self._createMarquee()
 
         self._createGhostclip()
@@ -154,6 +167,11 @@ class TimelineElement(Clutter.Actor, Zoomable):
         self.background.props.width = width
         self.background.props.height = height
         self.background.restore_easing_state()
+        self.border.save_easing_state()
+        self.border.set_easing_duration(600)
+        self.border.props.width = width
+        self.border.props.height = height
+        self.border.restore_easing_state()
         self.props.width = width
         self.props.height = height
         self.preview.save_easing_state()
@@ -206,21 +224,27 @@ class TimelineElement(Clutter.Actor, Zoomable):
         self.ghostclip.props.visible = False
         self.timeline.add_child(self.ghostclip)
 
+    def _createBorder(self):
+        self.border = RoundedRectangle(0, 0, 5, 5)
+        color = Cogl.Color()
+        color.init_from_4ub(100, 100, 100, 255)
+        self.border.set_border_color(color)
+        self.border.set_border_width(3)
+
+        self.border.set_position(0, 0)
+        self.add_child(self.border)
+
     def _createBackground(self, track):
         self.background = RoundedRectangle(0, 0, 5, 5)
         if track.type == GES.TrackType.AUDIO:
             color = Cogl.Color()
             color.init_from_4ub(70, 79, 118, 255)
-            self.background.set_color(color)
         else:
             color = Cogl.Color()
             color.init_from_4ub(225, 232, 238, 255)
-            self.background.set_color(color)
-
-        color = Cogl.Color()
-        color.init_from_4ub(100, 100, 100, 255)
-        self.background.set_border_color(color)
+        self.background.set_color(color)
         self.background.set_border_width(3)
+
         self.background.set_position(0, 0)
         self.add_child(self.background)
 
@@ -1008,7 +1032,7 @@ class VideoPreviewer(Clutter.Actor, Zoomable):
         self.duration = self.bElement.get_duration()
         self.in_point = self.bElement.get_inpoint()
 
-        self.thumb_margin = 5
+        self.thumb_margin = BORDER_WIDTH
         self.thumb_height = EXPANDED_SIZE - 2 * self.thumb_margin
         # self.thumb_width will be set by self._setupPipeline()
 
@@ -1098,7 +1122,8 @@ class VideoPreviewer(Clutter.Actor, Zoomable):
         number_of_thumbs = self.duration / thumb_duration
 
         current_time = 0
-        for i in range(0, number_of_thumbs):
+        # +1 because wa want to draw the rightmost thumbnail even if it will be clipped
+        for i in range(0, number_of_thumbs + 1):
             thumb = Thumbnail(self.thumb_width, self.thumb_height)
             thumb.set_position(Zoomable.nsToPixel(current_time), self.thumb_margin)
             self.add_child(thumb)
