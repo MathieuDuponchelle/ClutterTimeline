@@ -445,6 +445,8 @@ class Timeline(Clutter.ScrollActor, Zoomable):
     # Callbacks
 
     def _layerAddedCb(self, timeline, layer):
+        for element in self.elements:
+            self._setElementY(element)
         self.save_easing_state()
         self.props.height = (len(self.bTimeline.get_layers()) + 1) * (EXPANDED_SIZE + SPACING) * 2 + SPACING
         self.restore_easing_state()
