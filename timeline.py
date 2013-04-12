@@ -370,7 +370,7 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         self.props.height = (len(self.bTimeline.get_layers()) + 1) * (EXPANDED_SIZE + SPACING) * 2 + SPACING
         self.restore_easing_state()
         self._container.vadj.props.upper = self.props.height
-        self._container.addLayerControl(layer)
+        self._container.controls.addLayerControl(layer)
         self._updatePlayHead()
 
     def _layerRemovedCb(self, timeline, layer):
@@ -530,60 +530,12 @@ class ControlActor(GtkClutter.Actor):
             self._container.moveLayer(self, priority)
         self._container._reorderLayerActors()
 
-class TimelineTest(Zoomable):
-    def __init__(self):
-        gtksettings = Gtk.Settings.get_default()
-        gtksettings.set_property("gtk-application-prefer-dark-theme", True)
-        Zoomable.__init__(self)
-        GObject.threads_init()
-        self.window = Gtk.Window()
-        self.embed = GtkClutter.Embed()
-        self.embed.show()
-        vbox = Gtk.VBox()
-        self.window.add(vbox)
-
+class ControlContainer(Clutter.ScrollActor):
+    def __init__(self, timeline):
+        Clutter.ScrollActor.__init__(self)
         self.controlActors = []
         self.trackControls = []
-
-        self.point = Clutter.Point()
-        self.point.x = 0
-        self.point.y = 0
-
-        self.zoomBox = ZoomBox(self)
-        vbox.pack_end(self.zoomBox, False, False, False)
-
-        self._packScrollbars(vbox)
-
-        self.viewer = ViewerWidget()
-
-        vbox.pack_end(self.viewer, False, False, False)
-
-        self.viewer.set_size_request(200, 200)
-
-        stage = self.embed.get_stage()
-        stage.set_background_color(Clutter.Color.new(31, 30, 33, 255))
-
-        self.stage = stage
-
-        self.embed.connect("scroll-event", self._scrollEventCb)
-
-        self.stage.set_throttle_motion_events(True)
-
-        self.window.maximize()
-
-        stage.show()
-
-        widget = Timeline(self)
-
-        stage.add_child(widget)
-        widget.set_position(CONTROL_WIDTH, 0)
-        stage.connect("destroy", quit_)
-        stage.connect("button-press-event", self._clickedCb)
-        self.timeline = widget
-
-        self.scrolled = 0
-        self.window.show_all()
-        self.ruler.hide()
+        self.timeline = timeline
 
     def _setTrackControlPosition(self, control):
         y = control.layer.get_priority() * (EXPANDED_SIZE + SPACING) + SPACING
@@ -620,7 +572,6 @@ class TimelineTest(Zoomable):
                 if priority < prio <= target:
                     layer.props.priority = prio - 1
         movedLayer.props.priority = target
-        self.highlightSeparator(1000)
 
         self._reorderLayerActors()
         self.timeline.bTimeline.enable_update(True)
@@ -636,26 +587,77 @@ class TimelineTest(Zoomable):
         controlActor.layer = layer
         controlActor.set_size(CONTROL_WIDTH, EXPANDED_SIZE + SPACING)
 
-        self.stage.add_child(controlActor)
+        self.add_child(controlActor)
         self.trackControls.append(control)
         self.controlActors.append(controlActor)
-
-    def highlightSeparator(self, priority):
-        for control in self.trackControls:
-            if control.layer.get_priority() == priority:
-                control.setSeparatorHighlight(True)
-            else:
-                control.setSeparatorHighlight(False)
 
     def selectLayerControl(self, layer_control):
         for control in self.trackControls:
             control.selected = False
         layer_control.selected = True
+        self.props.height += (EXPANDED_SIZE + SPACING) * 2 + SPACING
 
     def addLayerControl(self, layer):
         self.addTrackControl(layer, False)
         self.addTrackControl(layer, True)
         self._reorderLayerActors()
+
+class TimelineTest(Zoomable):
+    def __init__(self):
+        gtksettings = Gtk.Settings.get_default()
+        gtksettings.set_property("gtk-application-prefer-dark-theme", True)
+        Zoomable.__init__(self)
+        GObject.threads_init()
+        self.window = Gtk.Window()
+        self.embed = GtkClutter.Embed()
+        self.embed.show()
+        vbox = Gtk.VBox()
+        self.window.add(vbox)
+
+        self.point = Clutter.Point()
+        self.point.x = 0
+        self.point.y = 0
+
+        self.zoomBox = ZoomBox(self)
+        vbox.pack_end(self.zoomBox, False, False, False)
+
+        self._packScrollbars(vbox)
+
+        self.viewer = ViewerWidget()
+
+        vbox.pack_end(self.viewer, False, False, False)
+
+        self.viewer.set_size_request(200, 200)
+
+        stage = self.embed.get_stage()
+        stage.set_background_color(Clutter.Color.new(31, 30, 33, 255))
+
+        self.stage = stage
+
+        self.embed.connect("scroll-event", self._scrollEventCb)
+
+        self.stage.set_throttle_motion_events(True)
+
+        self.window.maximize()
+
+        stage.show()
+
+        widget = Timeline(self)
+
+        self.controls = ControlContainer(widget)
+        stage.add_child(self.controls)
+        self.controls.set_position(0, 0)
+        self.controls.set_z_position(2)
+
+        stage.add_child(widget)
+        widget.set_position(CONTROL_WIDTH, 0)
+        stage.connect("destroy", quit_)
+        stage.connect("button-press-event", self._clickedCb)
+        self.timeline = widget
+
+        self.scrolled = 0
+        self.window.show_all()
+        self.ruler.hide()
 
     def _packScrollbars(self, vbox):
         self.hadj = Gtk.Adjustment()
@@ -705,6 +707,8 @@ class TimelineTest(Zoomable):
         point.y = self.vadj.get_value()
         self.point = point
         self.timeline.scroll_to_point(point)
+        point.x = 0
+        self.controls.scroll_to_point(point)
 
     def zoomChanged(self):
         self.updateHScrollAdjustments()
