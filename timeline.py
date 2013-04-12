@@ -738,7 +738,7 @@ class TimelineTest(Zoomable):
 
         self.scrolled = 0
         self.window.show_all()
-        self.ruler.hide()
+#        self.ruler.hide()
 
     def _packScrollbars(self, vbox):
         self.hadj = Gtk.Adjustment()
