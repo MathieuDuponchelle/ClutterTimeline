@@ -484,6 +484,7 @@ class ControlActor(GtkClutter.Actor):
         self.layer = layer
         self._setUpDragAndDrop()
         self._container = container
+        self.widget = widget
 
     def _getLayerForY(self, y):
         if self.isAudio:
@@ -499,22 +500,30 @@ class ControlActor(GtkClutter.Actor):
         self.dragAction.connect("drag-end", self._dragEndCb)
 
     def _dragBeginCb(self, action, actor, event_x, event_y, modifiers):
+        self.brother = self._container.getBrotherControl(self)
+        self.brother.raise_top()
+        self.raise_top()
         self.nbrLayers = len(self._container.timeline.bTimeline.get_layers())
         self._dragBeginStartX = event_x
 
     def _dragProgressCb(self, action, actor, delta_x, delta_y):
         y = self.dragAction.get_motion_coords()[1]
         priority = self._getLayerForY(y)
-        if self.layer.get_priority() != priority:
-            self._container.highlightSeparator(priority)
-        else:
-            self._container.highlightSeparator(1000)
+        lowerLimit = 0
+        if self.isAudio:
+            lowerLimit = self.nbrLayers * (EXPANDED_SIZE + SPACING)
+        if actor.props.y + delta_y > lowerLimit and priority < self.nbrLayers:
+            actor.move_by(0, delta_y)
+            self.brother.move_by(0, delta_y)
+        if self.layer.get_priority() != priority and priority >= 0 and priority < self.nbrLayers:
+            self._container.moveLayer(self, priority)
         return False
 
     def _dragEndCb(self, action, actor, event_x, event_y, modifiers):
         priority = self._getLayerForY(event_y)
         if self.layer.get_priority() != priority and priority >= 0 and priority < self.nbrLayers:
             self._container.moveLayer(self, priority)
+        self._container._reorderLayerActors()
 
 class TimelineTest(Zoomable):
     def __init__(self):
@@ -583,6 +592,11 @@ class TimelineTest(Zoomable):
             control.set_easing_mode(Clutter.AnimationMode.EASE_OUT_BACK)
             self._setTrackControlPosition(control)
             control.restore_easing_state()
+
+    def getBrotherControl(self, control):
+        for cont in self.controlActors:
+            if cont != control and cont.layer == control.layer:
+                return cont
 
     def moveLayer(self, control, target):
         movedLayer = control.layer
