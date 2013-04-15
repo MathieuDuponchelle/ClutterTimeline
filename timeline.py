@@ -529,6 +529,7 @@ class Timeline(Clutter.ScrollActor, Zoomable):
 
     def _positionCb(self, pipeline, position):
         self.playhead.props.x = self.nsToPixel(position)
+        self._container._scrollToPlayhead()
         self.lastPosition = position
 
     def _updatePlayHead(self):
@@ -1103,7 +1104,7 @@ class TimelineTest(Zoomable):
         self.bus.connect("message", self.handle_message)
         self.playButton.connect("clicked", self.togglePlayback)
         #self.pipeline.togglePlayback()
-        self.pipeline.activatePositionListener()
+        self.pipeline.activatePositionListener(interval=50)
         self.timeline.setPipeline(self.pipeline)
         GObject.timeout_add(1000, self.doSeek)
         Zoomable.setZoomLevel(50)
