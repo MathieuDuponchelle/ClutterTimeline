@@ -491,6 +491,7 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         self.selection = Selection()
         self._createPlayhead()
         self._container = container
+        self.lastPosition = 0
 
     # Public API
 
@@ -527,8 +528,8 @@ class Timeline(Clutter.ScrollActor, Zoomable):
     #Internal API
 
     def _positionCb(self, pipeline, position):
-        self.playhead.set_z_position(1)
         self.playhead.props.x = self.nsToPixel(position)
+        self.lastPosition = position
 
     def _updatePlayHead(self):
         height = len(self.bTimeline.get_layers()) * (EXPANDED_SIZE + SPACING) * 2
@@ -540,6 +541,7 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         self.playhead.set_size(0, 0)
         self.playhead.set_position(0, 0)
         self.add_child(self.playhead)
+        self.playhead.set_z_position(1)
 
     def _addTimelineElement(self, track, bElement):
         element = TimelineElement(bElement, track, self)
@@ -592,6 +594,7 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         for element in self.elements:
             self._setElementX(element)
         self.restore_easing_state()
+        self.playhead.props.x = self.nsToPixel(self.lastPosition)
 
     # Interface overrides (Zoomable)
 
@@ -1019,6 +1022,14 @@ class TimelineTest(Zoomable):
         self._hscrollBar.set_value(0)
         self._setBestZoomRatio()
 
+    def scrollToPosition(self, position):
+        if position > self.hadj.props.upper:
+            # we can't perform the scroll because the canvas needs to be
+            # updated
+            GLib.idle_add(self._scrollToPosition, position)
+        else:
+            self._scrollToPosition(position)
+
     def _scrollLeft(self):
         self._hscrollBar.set_value(self._hscrollBar.get_value() -
             self.hadj.props.page_size ** (2.0 / 3.0))
@@ -1035,6 +1046,17 @@ class TimelineTest(Zoomable):
         self._vscrollbar.set_value(self._vscrollbar.get_value() +
             self.vadj.props.page_size ** (2.0 / 3.0))
 
+    def _scrollToPosition(self, position):
+        self._hscrollBar.set_value(position)
+        return False
+
+    def _scrollToPlayhead(self):
+        canvas_size = self.embed.get_allocation().width - CONTROL_WIDTH
+        new_pos = self.timeline.playhead.props.x
+        scroll_pos = self.hadj.get_value()
+        self.scrollToPosition(min(new_pos - canvas_size / 2,
+                                  self.hadj.props.upper - canvas_size - 1))
+
     def goToPoint(self, timeline):
         point = Clutter.Point()
         point.x = 1000
@@ -1043,11 +1065,6 @@ class TimelineTest(Zoomable):
         return False
 
     def addClipToLayer(self, layer, asset, start, duration, inpoint):
-#        clip = asset.extract()
-#        clip.set_start(start * Gst.SECOND)
-#        clip.set_duration(duration * Gst.SECOND)
-#        clip.set_inpoint(inpoint * Gst.SECOND)
-#        layer.add_clip(clip)
         layer.add_asset(asset, start * Gst.SECOND, 0, duration * Gst.SECOND, 1.0, asset.get_supported_formats())
 
     def handle_message(self, bus, message):
@@ -1099,6 +1116,7 @@ class TimelineTest(Zoomable):
                 Zoomable.zoomIn()
             elif deltas[2] > 0:
                 Zoomable.zoomOut()
+            self._scrollToPlayhead()
         elif event.state & Gdk.ModifierType.SHIFT_MASK:
             if deltas[2] > 0:
                 self._scrollDown()
