@@ -245,6 +245,7 @@ class EditingContext(Signallable):
             self.focus = focus.get_parent()
         else:
             self.focus = focus
+
         self.timeline = timeline
 
         self.edge = edge

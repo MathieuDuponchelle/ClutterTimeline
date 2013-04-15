@@ -123,6 +123,106 @@ class RoundedRectangle(Clutter.Actor):
         self._border_color = color
         self.queue_redraw()
 
+class TrimHandle(Clutter.Texture):
+    def __init__(self, timelineElement, isLeft):
+        Clutter.Texture.__init__(self)
+        self.set_from_file("trimbar-normal.png")
+        self.isLeft = isLeft
+        self.set_size(-1, EXPANDED_SIZE)
+        self.hide()
+
+        self.isSelected = False
+
+        self.timelineElement = timelineElement
+
+        self.set_reactive(True)
+
+        self.dragAction = Clutter.DragAction()
+        self.add_action(self.dragAction)
+
+        self.dragAction.connect("drag-begin", self._dragBeginCb)
+        self.dragAction.connect("drag-end", self._dragEndCb)
+        self.dragAction.connect("drag-progress", self._dragProgressCb)
+
+        self.connect("enter-event", self._enterEventCb)
+        self.connect("leave-event", self._leaveEventCb)
+        self.timelineElement.connect("enter-event", self._elementEnterEventCb)
+        self.timelineElement.connect("leave-event", self._elementLeaveEventCb)
+        self.timelineElement.bElement.selected.connect("selected-changed", self._selectedChangedCb)
+
+    #Callbacks
+
+    def _enterEventCb(self, actor, event):
+        self.timelineElement.set_reactive(False)
+        for elem in self.timelineElement.get_children():
+            elem.set_reactive(False)
+        self.set_reactive(True)
+        self.set_from_file("trimbar-focused.png")
+        if self.isLeft:
+            self.timelineElement.timeline._container.embed.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.LEFT_SIDE))
+        else:
+            self.timelineElement.timeline._container.embed.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.RIGHT_SIDE))
+
+    def _leaveEventCb(self, actor, event):
+        self.timelineElement.set_reactive(True)
+        for elem in self.timelineElement.get_children():
+            elem.set_reactive(True)
+        self.set_from_file("trimbar-normal.png")
+        self.timelineElement.timeline._container.embed.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.ARROW))
+
+    def _elementEnterEventCb(self, actor, event):
+        self.show()
+
+    def _elementLeaveEventCb(self, actor, event):
+        if not self.isSelected:
+            self.hide()
+
+    def _selectedChangedCb(self, selected, isSelected):
+        self.isSelected = isSelected
+        self.props.visible = isSelected
+
+    def _dragBeginCb(self, action, actor, event_x, event_y, modifiers):
+        self.timelineElement.setDragged(True)
+        elem = self.timelineElement.bElement.get_parent()
+
+        if self.isLeft:
+            edge = GES.Edge.EDGE_START
+            self._dragBeginStart = self.timelineElement.bElement.get_parent().get_start()
+        else:
+            edge = GES.Edge.EDGE_END
+            self._dragBeginStart = self.timelineElement.bElement.get_parent().get_duration() + \
+                self.timelineElement.bElement.get_parent().get_start()
+
+        self._context = EditingContext(elem,
+                                       self.timelineElement.timeline.bTimeline,
+                                       GES.EditMode.EDIT_TRIM,
+                                       edge,
+                                       set([]),
+                                       None)
+
+        self.dragBeginStartX = event_x
+        self.dragBeginStartY = event_y
+
+    def _dragProgressCb(self, action, actor, delta_x, delta_y):
+        # We can't use delta_x here because it fluctuates weirdly.
+        coords = self.dragAction.get_motion_coords()
+        delta_x = coords[0] - self.dragBeginStartX
+
+        new_start = self._dragBeginStart + Zoomable.pixelToNs(delta_x)
+
+        self._context.editTo(new_start, self.timelineElement.bElement.get_parent().get_layer().get_priority())
+        return False
+
+    def _dragEndCb(self, action, actor, event_x, event_y, modifiers):
+        self.timelineElement.setDragged(False)
+        self._context.finish()
+        self.timelineElement.set_reactive(True)
+        for elem in self.timelineElement.get_children():
+            elem.set_reactive(True)
+        self.set_from_file("trimbar-normal.png")
+        self.timelineElement.timeline._container.embed.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.ARROW))
+
+
 class TimelineElement(Clutter.Actor, Zoomable):
     def __init__(self, bElement, track, timeline):
         """
@@ -137,6 +237,9 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
         self.bElement = bElement
 
+        self.bElement.selected = Selected()
+        self.bElement.selected.connect("selected-changed", self._selectedChangedCb)
+
         self._createBackground(track)
 
         self._createPreview()
@@ -145,40 +248,50 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
         self._createMarquee()
 
+        self._createHandles()
+
         self._createGhostclip()
 
         self.track_type = self.bElement.get_track_type() # This won't change
 
+        self.isDragged = False
+
         size = self.bElement.get_duration()
-        self.set_size(self.nsToPixel(size), EXPANDED_SIZE)
+        self.set_size(self.nsToPixel(size), EXPANDED_SIZE, False)
         self.set_reactive(True)
         self._connectToEvents()
-        self.bElement.selected = Selected()
-        self.bElement.selected.connect("selected-changed", self._selectedChangedCb)
 
     # Public API
 
-    def set_size(self, width, height):
-        self.save_easing_state()
-        self.set_easing_duration(600)
+    def set_size(self, width, height, ease):
+        if ease:
+            self.save_easing_state()
+            self.set_easing_duration(600)
+            self.background.save_easing_state()
+            self.background.set_easing_duration(600)
+            self.border.save_easing_state()
+            self.border.set_easing_duration(600)
+            self.preview.save_easing_state()
+            self.preview.set_easing_duration(600)
+            self.rightHandle.save_easing_state()
+            self.rightHandle.set_easing_duration(600)
+
         self.marquee.set_size(width, height)
-        self.background.save_easing_state()
-        self.background.set_easing_duration(600)
         self.background.props.width = width
         self.background.props.height = height
-        self.background.restore_easing_state()
-        self.border.save_easing_state()
-        self.border.set_easing_duration(600)
         self.border.props.width = width
         self.border.props.height = height
-        self.border.restore_easing_state()
         self.props.width = width
         self.props.height = height
-        self.preview.save_easing_state()
-        self.preview.set_easing_duration(600)
         self.preview.set_size(width, height)
-        self.preview.restore_easing_state()
-        self.restore_easing_state()
+        self.rightHandle.set_position(width - self.rightHandle.props.width, 0)
+
+        if ease:
+            self.background.restore_easing_state()
+            self.border.restore_easing_state()
+            self.preview.restore_easing_state()
+            self.rightHandle.restore_easing_state()
+            self.restore_easing_state()
 
     def updateGhostclip(self, priority, y, isControlledByBrother):
         # Only tricky part of the code, can be called by the linked track element.
@@ -216,6 +329,16 @@ class TimelineElement(Clutter.Actor, Zoomable):
                     self.ghostclip.props.y += self.nbrLayers * (EXPANDED_SIZE + SPACING)
                 self.ghostclip.props.visible = True
 
+    def update(self, ease):
+        size = self.bElement.get_duration()
+        self.set_size(self.nsToPixel(size), EXPANDED_SIZE, ease)
+
+    def setDragged(self, dragged):
+        brother = self.timeline.findBrother(self.bElement)
+        if brother:
+            brother.isDragged = dragged
+        self.isDragged = dragged
+
     # Internal API
 
     def _createGhostclip(self):
@@ -247,6 +370,13 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
         self.background.set_position(0, 0)
         self.add_child(self.background)
+
+    def _createHandles(self):
+        self.leftHandle = TrimHandle(self, True)
+        self.rightHandle = TrimHandle(self, False)
+        self.add_child(self.leftHandle)
+        self.add_child(self.rightHandle)
+        self.leftHandle.set_position(0, 0)
 
     def _createPreview(self):
         self.preview = get_preview_for_object(self.bElement)
@@ -282,8 +412,7 @@ class TimelineElement(Clutter.Actor, Zoomable):
     # Interface (Zoomable)
 
     def zoomChanged(self):
-        size = self.bElement.get_duration()
-        self.set_size(self.nsToPixel(size), EXPANDED_SIZE)        
+        self.update(True)
 
     # Callbacks
 
@@ -297,6 +426,7 @@ class TimelineElement(Clutter.Actor, Zoomable):
         # This can't change during a drag, so we can safely compute it now for drag events.
         self.nbrLayers = len(self.timeline.bTimeline.get_layers())
         # We can also safely find if the object has a brother element
+        self.setDragged(True)
         self.brother = self.timeline.findBrother(self.bElement)
         if self.brother:
             self.brother.nbrLayers = self.nbrLayers
@@ -336,6 +466,8 @@ class TimelineElement(Clutter.Actor, Zoomable):
 
         priority = self._getLayerForY(coords[1] + self.timeline._container.point.y)
         priority = min(priority, len(self.timeline.bTimeline.get_layers()))
+
+        self.setDragged(False)
 
         self.ghostclip.props.visible = False
         if self.brother:
@@ -431,11 +563,13 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         bElement.disconnect_by_func("notify::duration", self._elementDurationChangedCb)
         bElement.disconnect_by_func("notify::in-point", self._elementInPointChangedCb)
 
-    def _setElementX(self, element):
-        element.save_easing_state()
-        element.set_easing_duration(600)
+    def _setElementX(self, element, ease = True):
+        if ease:
+            element.save_easing_state()
+            element.set_easing_duration(600)
         element.props.x = self.nsToPixel(element.bElement.get_start())
-        element.restore_easing_state()
+        if ease:
+            element.restore_easing_state()
 
     # Crack, change that when we have retractable layers
     def _setElementY(self, element):
@@ -454,12 +588,10 @@ class Timeline(Clutter.ScrollActor, Zoomable):
 
     def _redraw(self):
         self.save_easing_state()
-#        self.set_easing_duration(0)
         self.props.width = self.nsToPixel(self.bTimeline.get_duration()) + 250
         for element in self.elements:
             self._setElementX(element)
         self.restore_easing_state()
-
 
     # Interface overrides (Zoomable)
 
@@ -507,13 +639,16 @@ class Timeline(Clutter.ScrollActor, Zoomable):
         self._setElementY(element)
 
     def _elementStartChangedCb(self, bElement, start, element):
-        self._setElementX(element)
+        if element.isDragged:
+            self._setElementX(element, ease = False)
+        else:
+            self._setElementX(element)
 
     def _elementDurationChangedCb(self, bElement, duration, element):
-        pass
+        element.update(False)
 
     def _elementInPointChangedCb(self, bElement, inpoint, element):
-        pass
+        self._setElementX(element, ease = False)
 
     def _layerPriorityChangedCb(self, layer, priority):
         self._redraw()
@@ -798,9 +933,9 @@ class TimelineTest(Zoomable):
         vbox.pack_end(hbox, True, True, True)
 
         hbox = Gtk.HBox()
-        label = Gtk.Label("layer controls")
-        label.set_size_request(CONTROL_WIDTH, -1)
-        hbox.pack_start(label, False, True, False)
+        self.playButton = Gtk.Button("play")
+        self.playButton.set_size_request(CONTROL_WIDTH, -1)
+        hbox.pack_start(self.playButton, False, True, False)
         hbox.pack_start(self.ruler, True, True, True)
 
         vbox.pack_end(hbox, False, True, False)
@@ -908,11 +1043,12 @@ class TimelineTest(Zoomable):
         return False
 
     def addClipToLayer(self, layer, asset, start, duration, inpoint):
-        clip = asset.extract()
-        clip.set_start(start * Gst.SECOND)
-        clip.set_duration(duration * Gst.SECOND)
-        clip.set_inpoint(inpoint * Gst.SECOND)
-        layer.add_clip(clip)
+#        clip = asset.extract()
+#        clip.set_start(start * Gst.SECOND)
+#        clip.set_duration(duration * Gst.SECOND)
+#        clip.set_inpoint(inpoint * Gst.SECOND)
+#        layer.add_clip(clip)
+        layer.add_asset(asset, start * Gst.SECOND, 0, duration * Gst.SECOND, 1.0, asset.get_supported_formats())
 
     def handle_message(self, bus, message):
         if message.type == Gst.MessageType.ELEMENT:
@@ -935,6 +1071,9 @@ class TimelineTest(Zoomable):
         #self.pipeline.simple_seek(3000000000)
         return False
 
+    def togglePlayback(self, button):
+        self.pipeline.togglePlayback()
+
     def _doAssetAddedCb(self, project, asset, layer):
         self.addClipToLayer(layer, asset, 2, 10, 5)
         self.addClipToLayer(layer, asset, 15, 10, 5)
@@ -945,6 +1084,7 @@ class TimelineTest(Zoomable):
         self.bus = self.pipeline.get_bus()
         self.bus.add_signal_watch()
         self.bus.connect("message", self.handle_message)
+        self.playButton.connect("clicked", self.togglePlayback)
         #self.pipeline.togglePlayback()
         self.pipeline.activatePositionListener()
         self.timeline.setPipeline(self.pipeline)
@@ -1026,8 +1166,8 @@ class VideoPreviewer(Clutter.Actor, Zoomable):
 
         self.bElement = bElement
 
-        self.bElement.connect("notify::duration", self.element_changed)
-        self.bElement.connect("notify::in-point", self.element_changed)
+#        self.bElement.connect("notify::duration", self.element_changed)
+#        self.bElement.connect("notify::in-point", self.element_changed)
 
         self.duration = self.bElement.get_duration()
         self.in_point = self.bElement.get_inpoint()
@@ -1222,7 +1362,7 @@ class VideoPreviewer(Clutter.Actor, Zoomable):
     #@handler(bElement, "notify::in-point")
     def element_changed(self, unused_bElement, unused_start_duration):
         self.duration = self.bElement.get_duration()
-        self.in_point = self.bElement.get_in_point()
+        self.in_point = self.bElement.get_inpoint()
         GLib.idle_add(self._addThumbnails)
 
 class Thumbnail(Clutter.Actor):
